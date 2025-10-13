@@ -3,88 +3,53 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/white">
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <ImageView
+    <!-- Video overlay -->
+    <io.github.sceneview.SceneView
+        android:id="@+id/sceneView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/videoView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:src="@drawable/ic_launcher_background" />
+        android:visibility="gone"/>
 
-    <LinearLayout
+    <!-- Buttons -->
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:gravity="center"
+        android:clickable="false"
+        android:layout_marginBottom="20dp"
+        android:padding="16dp">
 
-        <com.google.ar.sceneform.SceneView
-            android:id="@+id/sceneView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:background="#FF0000FF" />
-    </LinearLayout>
+        <Button
+            android:id="@+id/btnPlayVideo"
+            android:layout_height="50dp"
+            android:layout_width="0dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            android:text="Play Video"/>
 
+        <Button
+            android:id="@+id/btnTogglePitch"
+            android:layout_width="wrap_content"
+            android:layout_height="50dp"
+            android:text="Show Pitch"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toEndOf="@+id/btnPlayVideo" />
+
+        <Button
+            android:id="@+id/btnBallTrack"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:text="Show Ball Track"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toEndOf="@+id/btnTogglePitch" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </FrameLayout>
-
-
-
-
-
-
-<!--<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"-->
-<!--    xmlns:app="http://schemas.android.com/apk/res-auto"-->
-<!--    xmlns:tools="http://schemas.android.com/tools"-->
-<!--    android:layout_width="match_parent"-->
-<!--    android:layout_height="match_parent"-->
-<!--    android:orientation="vertical"-->
-<!--    android:padding="16dp"-->
-<!--    tools:context=".MainActivity">-->
-
-<!--    &lt;!&ndash; Title &ndash;&gt;-->
-<!--    <TextView-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:text="3D Model Viewer"-->
-<!--        android:textSize="24sp"-->
-<!--        android:textStyle="bold"-->
-<!--        android:gravity="center"-->
-<!--        android:layout_marginBottom="24dp" />-->
-
-<!--    &lt;!&ndash; Load Model Button &ndash;&gt;-->
-<!--    <com.google.android.material.button.MaterialButton-->
-<!--        android:id="@+id/loadModelButton"-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:text="Load 3D Model"-->
-<!--        android:textSize="18sp"-->
-<!--        android:layout_marginBottom="16dp"-->
-<!--        app:icon="@android:drawable/ic_menu_view"-->
-<!--        app:iconGravity="textStart" />-->
-
-<!--    &lt;!&ndash; Progress Bar &ndash;&gt;-->
-<!--    <ProgressBar-->
-<!--        android:id="@+id/progressBar"-->
-<!--        android:layout_width="wrap_content"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:layout_gravity="center"-->
-<!--        android:visibility="gone" />-->
-
-<!--    &lt;!&ndash; SceneView for 3D Model &ndash;&gt;-->
-<!--    <io.github.sceneview.SceneView-->
-<!--        android:id="@+id/sceneView"-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="0dp"-->
-<!--        android:layout_weight="1"-->
-<!--        android:visibility="gone" />-->
-
-<!--    &lt;!&ndash; Status Text &ndash;&gt;-->
-<!--    <TextView-->
-<!--        android:id="@+id/statusText"-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="wrap_content"-->
-<!--        android:text="Click the button to load a 3D model"-->
-<!--        android:textSize="16sp"-->
-<!--        android:gravity="center"-->
-<!--        android:layout_marginTop="16dp"-->
-<!--        android:padding="8dp" />-->
-
-<!--</LinearLayout>-->
