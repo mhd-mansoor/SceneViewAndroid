@@ -4,9 +4,9 @@ import android.os.Bundle
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
-import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.example.sceneviewandroid.databinding.ActivityMainBinding
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
 import com.google.android.filament.IndexBuffer
@@ -15,7 +15,6 @@ import com.google.android.filament.RenderableManager
 import com.google.android.filament.VertexBuffer
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.SceneView
-import io.github.sceneview.loaders.MaterialLoader
 import io.github.sceneview.math.Color
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.model.ModelInstance
@@ -24,23 +23,32 @@ import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.nio.ShortBuffer
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var arSceneView: SceneView
+    companion object {
+        private const val TAG = "MANSOOR"
+
+        // Tuning values (change to fine-tune visual match)
+        private const val SCALE = 0.12f          // overall scaling of BallTrack coordinates into scene
+        private const val HEIGHT_BOOST = 1.4f   // add to Y so track starts high above bowler
+        private val STADIUM_OFFSET = Float3(0f, -0.4f, -3.7f) // align with stadium node position
+    }
+
+    private lateinit var sceneView: SceneView
     private var modelNode: ModelNode? = null
 
-    // drag + zoom state
+    private lateinit var binding: ActivityMainBinding
+
+    // touch / orbit state
     private var lastTouchX = 0f
     private var lastTouchY = 0f
-    private var rotationY = 0f
+    private var rotationY = 0f   // horizontal orbit (degrees)
+    private var rotationX = 0f   // vertical tilt (degrees)
     private var lastDistance = 0f
     private var scaleFactor = 1.0f
 
@@ -48,274 +56,195 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        arSceneView = findViewById(R.id.sceneView)
-        val button: Button = findViewById(R.id.btnBallTrack)
+        sceneView = binding.sceneView
+        val btnBallTrack= binding.btnBallTrack
 
         gestureDetector = GestureDetector(this, GestureListener())
-        loadModel()
 
-        button.setOnClickListener {
+        loadStadiumModel()
+
+        btnBallTrack.setOnClickListener {
             Toast.makeText(this, "Button Clicked", Toast.LENGTH_SHORT).show()
-            // draw the single-tube curved track (safe, with fallback)
-            drawBallTrackFromParameterss(arSceneView)
+            drawBallTrackFromParameters()
         }
 
         setupTouchControls()
     }
 
-    private fun loadModel() {
-        val modelLoader = arSceneView.modelLoader
+    // ---------- Model loading ----------
+    private fun loadStadiumModel() {
+        val modelLoader = sceneView.modelLoader
         val modelInstance: ModelInstance? = try {
             modelLoader.createModelInstance(assetFileLocation = "models/stadium.glb")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Model load failed: ${e.message}", e)
+            Log.e(TAG, "Model load failed: ${e.message}", e)
             null
         }
 
-        modelNode = if (modelInstance != null) {
-            ModelNode(modelInstance = modelInstance).apply {
-                // prefer Float3 position/scale rather than Position/Scale types
+        modelNode = modelInstance?.let {
+            ModelNode(modelInstance = it).apply {
+                // model position and scale
                 position = Float3(0f, -0.5f, -3.7f)
                 scale = Float3(0.3f, 0.3f, 0.3f)
                 rotation = Rotation(0f, 0f, 0f)
             }
-        } else {
-            null
         }
 
-        modelNode?.let { arSceneView.addChildNode(it) }
+        modelNode?.let { sceneView.addChildNode(it) }
     }
 
-    /**
-     * Build and add a single continuous tubular mesh following a bowling-like path.
-     * This function is defensive: if mesh build fails for any reason it falls back to a
-     * simple CylinderNode to avoid Filament AABB crashes.
-     */
-    private fun drawBallTrackFromParameterss(sceneView: SceneView) {
+    // ---------- Ball track: 2 arcs (auto bounce with ground detection) ----------
+    private fun drawBallTrackFromParameters() {
         val engine = sceneView.engine
         val material = sceneView.materialLoader.createColorInstance(Color(1f, 0f, 0f, 1f))
 
-        // BallTrack parameters (from your data)
-        val pX = floatArrayOf(6.8128065E-5f, 5.674988E-4f, -0.87317497f)
-        val pY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
-        val pZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
-        val minT = 0.68f
-        val maxT = 92.24f
+        val parameterX = floatArrayOf(0.000054f, 0.000054f, -0.95f)
+        val parameterY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
+        val parameterZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
 
-        val path = mutableListOf<Float3>()
-        val step = 0.4f
+        val minFrameIdx = -100.0f
+        val maxFrameIdx = 500.0f
+        val step = 1.0f
 
-        var t = minT
-        while (t <= maxT) {
-            val x = pX[0] * t * t + pX[1] * t + pX[2]
-            val y = pY[0] * t * t + pY[1] * t + pY[2]
-            val z = pZ[0] * t * t + pZ[1] * t + pZ[2]
+        // Visual ground in WORLD coordinates (matches how we render with SCALE + HEIGHT_BOOST + STADIUM_OFFSET)
+        val yGroundWorld = -20.0f
 
-            // Adjust to SceneView coordinate space
-            // These numbers are tuned for your stadium.glb position and scale
-            val scale = 0.32f      // overall scene scaling
-            val heightBoost = 0.50f // start high
-            val offset = Float3(0.1f, -0.5f, -4.7f) // shift to align with stumps
+        // find bounceFrame using same transforms used for drawing (so bounce corresponds to visible ground)
+        var bounceFrame: Float? = null
+        var t = minFrameIdx
+        fun worldYAt(tVal: Float): Float {
+            val rawY = parameterY[0] * tVal * tVal + parameterY[1] * tVal + parameterY[2]
+            return rawY * SCALE + HEIGHT_BOOST + STADIUM_OFFSET.y
+        }
 
-            // Flip Z to face forward; amplify curve with scale factors
-            val pos = Float3(
-                x * scale + offset.x,
-                y * scale + heightBoost + offset.y,
-                -z * (scale * 0.3f) + offset.z
-            )
-            path += pos
+        var prevWorldY = worldYAt(t)
+        while (t <= maxFrameIdx) {
+            val worldY = worldYAt(t)
+            if (prevWorldY > yGroundWorld && worldY <= yGroundWorld) {
+                bounceFrame = t
+                break
+            }
+            prevWorldY = worldY
             t += step
         }
 
-        if (path.size < 2) {
-            Log.w("BallTrack", "No path points generated")
+        if (bounceFrame == null) {
+            Log.e(TAG, "⚠️ No ground crossing found in world coords. Cannot draw a two-part arc. prevWorldY=$prevWorldY")
+            Toast.makeText(this, "No ground crossing found.", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val (vertexBuffer, indexBuffer, indexCount) = buildTubeMesh(engine, path, 0.03f, 24)
+        Log.d(TAG, "✅ Bounce detected near t=$bounceFrame (worldY near ${worldYAt(bounceFrame)})")
 
-        val entity = EntityManager.get().create()
-        RenderableManager.Builder(1)
-            .geometry(
-                0,
-                RenderableManager.PrimitiveType.TRIANGLES,
-                vertexBuffer,
-                indexBuffer,
-                0,
-                indexCount
+        val preBouncePath = buildBallPath(
+            parameterX, parameterY, parameterZ,
+            minFrameIdx, bounceFrame, step, postBounce = false
+        )
+
+        val postBouncePath = buildBallPath(
+            parameterX, parameterY, parameterZ,
+            bounceFrame, maxFrameIdx, step, postBounce = true
+        )
+
+        Log.d(TAG, "Pre path size=${preBouncePath.size}, Post path size=${postBouncePath.size}")
+        if (preBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, preBouncePath)
+        if (postBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, postBouncePath)
+    }
+
+    private fun buildBallPath(
+        parameterX: FloatArray,
+        parameterY: FloatArray,
+        parameterZ: FloatArray,
+        startT: Float,
+        endT: Float,
+        step: Float,
+        postBounce: Boolean
+    ): List<Float3> {
+        val path = mutableListOf<Float3>()
+        var t = startT
+
+        // keep consistent base scale; tweak post-bounce visually
+        val heightBoost = if (postBounce) HEIGHT_BOOST * 0.25f else HEIGHT_BOOST
+        val scaleZ = if (postBounce) SCALE * 0.7f else SCALE * 0.8f
+
+        if (postBounce) {
+            // Use the *startT* (which is the bounce frame) to compute the first point,
+            // not endT (that was the bug).
+            val bouncePointT = startT
+            val bouncePoint = Float3(
+                parameterX[0] * bouncePointT * bouncePointT + parameterX[1] * bouncePointT + parameterX[2],
+                parameterY[0] * bouncePointT * bouncePointT + parameterY[1] * bouncePointT + parameterY[2],
+                parameterZ[0] * bouncePointT * bouncePointT + parameterZ[1] * bouncePointT + parameterZ[2]
             )
-            .material(0, material)
-            .culling(false)
-            .castShadows(false)
-            .receiveShadows(false)
-            .build(engine, entity)
-
-        val node = io.github.sceneview.node.Node(engine, entity)
-        sceneView.addChildNode(node)
-
-        Log.d("BallTrack", "✅ Drawn curved ball track (${path.size} pts)")
-    }
-
-
-    // ---------------------- helpers ----------------------
-
-    private fun generateBowlingPath(): List<Float3> {
-        val pts = mutableListOf<Float3>()
-        val segments = 120
-        for (i in 0..segments) {
-            val t = i / segments.toFloat()
-            val z = 2f - 6f * t            // forward (bowler→batsman)
-            val x = 0.12f * sin(t * PI).toFloat() // small swing
-            val y = if (t < 0.72f)
-                1.6f - 1.9f * t.pow(2.2f)     // descending arc
-            else
-                0.05f + 0.12f * (1f - t).pow(2f) // after bounce
-            pts += Float3(x, y, z)
+            path.add(
+                Float3(
+                    bouncePoint.x * SCALE + STADIUM_OFFSET.x,
+                    bouncePoint.y * SCALE + heightBoost + STADIUM_OFFSET.y,
+                    -bouncePoint.z * scaleZ + STADIUM_OFFSET.z
+                )
+            )
+            // start slightly after bounce to avoid repeating the same sample
+            t += step
         }
-        return pts
-    }
 
-
-    private fun drawBallTrackFromParameters(sceneView: SceneView) {
-        val engine = sceneView.engine
-        val materialLoader = sceneView.materialLoader
-        val material = materialLoader.createColorInstance(Color(1f, 0f, 0f, 1f))
-
-        // Parameters from your example
-        val parameterX = floatArrayOf(8.8128065E-5f, 5.674988E-4f, -0.87317497f)
-        val parameterY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
-        val parameterZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
-        val minFrameIdx = 54.68f
-        val maxFrameIdx = 92.24f
-
-        val pathPoints = mutableListOf<Float3>()
-        val step = 0.5f
-        var t = minFrameIdx
-
-        while (t <= maxFrameIdx) {
+        while (t <= endT) {
             val x = parameterX[0] * t * t + parameterX[1] * t + parameterX[2]
             val y = parameterY[0] * t * t + parameterY[1] * t + parameterY[2]
             val z = parameterZ[0] * t * t + parameterZ[1] * t + parameterZ[2]
 
-            // Convert to your stadium’s scale (around Z = -3.7)
-            // 🔥 Normalize & shift: reduces huge Z range into small 5-unit playable range
-            val scale = 0.15f
-            val offset = Float3(0f, -0.3f, -3.7f)
-
-            val pos = Float3(
-                x * scale + offset.x,
-                y * scale + offset.y,
-                -z * scale + offset.z
+            val p = Float3(
+                x * SCALE + STADIUM_OFFSET.x,
+                y * SCALE + heightBoost + STADIUM_OFFSET.y,
+                -z * scaleZ + STADIUM_OFFSET.z
             )
-
-            pathPoints += pos
+            path.add(p)
             t += step
         }
 
-        if (pathPoints.size < 2) {
-            Log.w("BallTrack", "No path points generated!")
-            return
-        }
-
-        val (vertexBuffer, indexBuffer, indexCount) = buildTubeMesh(engine, pathPoints, 0.05f, 24)
-
-        val entity = EntityManager.get().create()
-        RenderableManager.Builder(1)
-            .geometry(
-                0,
-                RenderableManager.PrimitiveType.TRIANGLES,
-                vertexBuffer,
-                indexBuffer,
-                0,
-                indexCount
-            )
-            .material(0, material)
-            .culling(false)
-            .castShadows(false)
-            .receiveShadows(false)
-            .build(engine, entity)
-
-        val node = io.github.sceneview.node.Node(engine, entity)
-        sceneView.addChildNode(node)
-
-        Log.d("BallTrack", "✅ Ball track drawn: ${pathPoints.size} points")
-    }
-
-
-    private fun buildTubeMesh(
-        engine: Engine,
-        path: List<Float3>,
-        radius: Float,
-        radialSegments: Int
-    ): Triple<VertexBuffer, IndexBuffer, Int> {
-
-        val verts = mutableListOf<Float3>()
-        val indices = mutableListOf<Short>()
-
-        val circle = List(radialSegments) { i ->
-            val angle = 2 * Math.PI * i / radialSegments
-            Float3(cos(angle).toFloat() * radius, sin(angle).toFloat() * radius, 0f)
-        }
-
-        for (p in path) for (c in circle)
-            verts += Float3(p.x + c.x, p.y + c.y, p.z + c.z)
-
-        for (i in 0 until path.size - 1) {
-            val row = i * radialSegments
-            val next = (i + 1) * radialSegments
-            for (j in 0 until radialSegments) {
-                val a = (row + j).toShort()
-                val b = (row + (j + 1) % radialSegments).toShort()
-                val c = (next + j).toShort()
-                val d = (next + (j + 1) % radialSegments).toShort()
-                indices += listOf(a, c, b, b, c, d)
-            }
-        }
-
-        val vertexCount = verts.size
-        val vertexBuffer = VertexBuffer.Builder()
-            .bufferCount(1)
-            .vertexCount(vertexCount)
-            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 12)
-            .build(engine)
-
-        val fb = FloatArray(vertexCount * 3)
-        for (i in verts.indices) {
-            fb[i * 3] = verts[i].x
-            fb[i * 3 + 1] = verts[i].y
-            fb[i * 3 + 2] = verts[i].z
-        }
-        vertexBuffer.setBufferAt(engine, 0, FloatBuffer.wrap(fb))
-
-        val indexBuffer = IndexBuffer.Builder()
-            .indexCount(indices.size)
-            .bufferType(IndexBuffer.Builder.IndexType.USHORT)
-            .build(engine)
-        indexBuffer.setBuffer(engine, ShortBuffer.wrap(indices.toShortArray()))
-
-        return Triple(vertexBuffer, indexBuffer, indices.size)
+        return path
     }
 
 
 
-    /**
-     * Build raw vertex and index arrays for a tube sweeping a circle along `path`.
-     * Returns Pair(verticesFloatArray, indicesShortArray)
-     */
-    private fun buildTubeVertexIndexLists(
-        path: List<Float3>,
-        radius: Float,
-        radialSegments: Int,
-    ): Pair<FloatArray, ShortArray> {
-        if (path.size < 2) return Pair(FloatArray(0), ShortArray(0))
+    // ---------- helper: safely draw tube geometry ----------
+    private fun drawTube(sceneView: SceneView, engine: Engine, material: MaterialInstance, path: List<Float3>) {
+        if (path.size < 2) return
+
+        try {
+            val (vb, ib, ic) = buildTubeMesh(engine, path, 0.05f, 24)
+            val entity = EntityManager.get().create()
+
+            RenderableManager.Builder(1)
+                .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vb, ib, 0, ic)
+                .material(0, material)
+                .culling(false)
+                .castShadows(false)
+                .receiveShadows(false)
+                .build(engine, entity)
+
+            val node = Node(engine, entity)
+            modelNode?.addChildNode(node) ?: sceneView.addChildNode(node)
+        } catch (e: Exception) {
+            Log.e(TAG, "Tube build failed, using fallback", e)
+            fallbackDrawSegments(sceneView, path, material, engine, 0.04f)
+        }
+    }
+
+
+    // ---------- Mesh builder (returns VertexBuffer, IndexBuffer, indexCount) ----------
+    // Creates direct buffers and returns Filament buffers; throws on error
+    private fun buildTubeMesh(engine: Engine, path: List<Float3>, radius: Float, radialSegments: Int):
+            Triple<VertexBuffer, IndexBuffer, Int> {
+
+        if (path.size < 2) throw IllegalArgumentException("path too short")
 
         val verts = ArrayList<Float>(path.size * radialSegments * 3)
         val indices = ArrayList<Short>((path.size - 1) * radialSegments * 6)
 
-        // create circle basis in XY plane and then translate to each path point (simple approach).
-        // For a visually ok result we ignore twisting; for production you should compute Frenet frames.
+        // circle points in local XY plane
         for (p in path) {
             for (j in 0 until radialSegments) {
                 val angle = 2.0 * PI * j / radialSegments
@@ -327,7 +256,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // indices (two triangles per quad)
         for (i in 0 until path.size - 1) {
             val row = i * radialSegments
             val next = (i + 1) * radialSegments
@@ -336,68 +264,74 @@ class MainActivity : AppCompatActivity() {
                 val b = (row + (j + 1) % radialSegments).toShort()
                 val c = (next + j).toShort()
                 val d = (next + (j + 1) % radialSegments).toShort()
-                // triangle a,c,b and b,c,d
+                // two triangles (a,c,b) and (b,c,d)
                 indices.add(a); indices.add(c); indices.add(b)
                 indices.add(b); indices.add(c); indices.add(d)
             }
         }
 
-        // convert to primitive arrays
         val vArr = FloatArray(verts.size)
         for (i in verts.indices) vArr[i] = verts[i]
         val iArr = ShortArray(indices.size)
         for (i in indices.indices) iArr[i] = indices[i]
 
-        return Pair(vArr, iArr)
+        val vertexCount = vArr.size / 3
+        if (vertexCount <= 0) throw IllegalStateException("vertexCount == 0")
+
+        val vb = VertexBuffer.Builder()
+            .bufferCount(1)
+            .vertexCount(vertexCount)
+            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 12)
+            .build(engine)
+
+        // fill direct ByteBuffer for vertex data
+        val vertexByteBuffer = ByteBuffer.allocateDirect(vArr.size * 4).order(ByteOrder.nativeOrder())
+        val vertexFloatBuffer = vertexByteBuffer.asFloatBuffer()
+        vertexFloatBuffer.put(vArr)
+        vertexFloatBuffer.rewind()
+        vb.setBufferAt(engine, 0, vertexFloatBuffer)
+
+        val ib = IndexBuffer.Builder()
+            .indexCount(iArr.size)
+            .bufferType(IndexBuffer.Builder.IndexType.USHORT)
+            .build(engine)
+
+        val indexByteBuffer = ByteBuffer.allocateDirect(iArr.size * 2).order(ByteOrder.nativeOrder())
+        val indexShortBuffer = indexByteBuffer.asShortBuffer()
+        indexShortBuffer.put(iArr)
+        indexShortBuffer.rewind()
+        ib.setBuffer(engine, indexShortBuffer)
+
+        return Triple(vb, ib, iArr.size)
     }
 
-    /**
-     * Fallback — draw many overlapping cylinders (never crashes) to approximate tube.
-     */
-    private fun fallbackDrawSegments(
-        sceneView: SceneView,
-        path: List<Float3>,
-        material: MaterialInstance,
-        engine: Engine,
-        radius: Float,
-    ) {
+    // ---------- fallback drawing (overlapping cylinders) ----------
+    private fun fallbackDrawSegments(sceneView: SceneView, path: List<Float3>, material: MaterialInstance, engine: Engine, radius: Float) {
         var last = path.first()
         for (i in 1 until path.size) {
             val current = path[i]
-            drawCylinderSegment(sceneView, last, current, material, engine, radius, overlap = 0.9f)
+            drawCylinderSegment(sceneView, last, current, material, engine, radius, overlap = 0.92f)
             last = current
         }
+        // parent fallback segments to stadium so they move together
     }
 
-    private fun drawCylinderSegment(
-        sceneView: SceneView,
-        start: Float3,
-        end: Float3,
-        material: MaterialInstance,
-        engine: Engine,
-        radius: Float,
-        overlap: Float,
-    ) {
+    private fun drawCylinderSegment(sceneView: SceneView, start: Float3, end: Float3, material: MaterialInstance, engine: Engine, radius: Float, overlap: Float) {
         val dx = end.x - start.x
         val dy = end.y - start.y
         val dz = end.z - start.z
         val length = sqrt(dx * dx + dy * dy + dz * dz) * overlap
         val mid = Float3((start.x + end.x) / 2f, (start.y + end.y) / 2f, (start.z + end.z) / 2f)
-        val cyl = CylinderNode(
-            engine = engine,
-            radius = radius,
-            height = length,
-            materialInstance = material
-        )
+        val cyl = CylinderNode(engine = engine, radius = radius, height = length, materialInstance = material)
         cyl.position = mid
         cyl.rotation = Rotation(x = 90f, y = 0f, z = 0f)
-        sceneView.addChildNode(cyl)
+        // parent to stadium if available
+        modelNode?.addChildNode(cyl) ?: sceneView.addChildNode(cyl)
     }
 
-    // ---------------- touch controls (drag = translate) ----------------
-
+    // ---------- touch: orbit (drag) + pinch (zoom) ----------
     private fun setupTouchControls() {
-        arSceneView.setOnTouchListener { v, event ->
+        sceneView.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
             when (event.pointerCount) {
                 1 -> handleRotate(event)
@@ -436,27 +370,32 @@ class MainActivity : AppCompatActivity() {
         val distance = sqrt(dx * dx + dy * dy)
         if (lastDistance != 0f) {
             val scaleChange = distance / lastDistance
-            scaleFactor = (scaleFactor * scaleChange).coerceIn(0.25f, 3.0f)
+            scaleFactor = (scaleFactor * scaleChange).coerceIn(0.25f, 2.5f)
+            // scale stadium and everything under it (including track)
             modelNode?.scale = Float3(scaleFactor, scaleFactor, scaleFactor)
         }
         lastDistance = distance
     }
 
+    // double-tap resets
     private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            resetModelView()
+            resetView()
             return true
         }
     }
 
-    private fun resetModelView() {
+    private fun resetView() {
+        rotationX = 0f
+        rotationY = 0f
         scaleFactor = 1.0f
         modelNode?.apply {
             rotation = Rotation(0f, 0f, 0f)
-            scale = Float3(scaleFactor, scaleFactor, scaleFactor)
+            scale = Float3(0.3f, 0.3f, 0.3f) // reset to original stadium scale
         }
     }
 
+    // ---------- lifecycle ----------
     override fun onResume() {
         super.onResume()
 //        arSceneView.resume()
@@ -468,7 +407,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        arSceneView.destroy()
+        sceneView.destroy()
         super.onDestroy()
     }
 }
