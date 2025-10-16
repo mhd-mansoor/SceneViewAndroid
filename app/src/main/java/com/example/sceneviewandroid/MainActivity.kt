@@ -6,6 +6,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.example.sceneviewandroid.databinding.ActivityMainBinding
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -21,6 +22,9 @@ import io.github.sceneview.model.ModelInstance
 import io.github.sceneview.node.CylinderNode
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
+import io.github.sceneview.node.SphereNode
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
@@ -28,15 +32,28 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+/**
+ * Main activity that:
+ * - Loads a 3D stadium model using SceneView
+ * - Generates and draws a two-part "ball trajectory" (before and after bounce)
+ * - Animates a ball along this trajectory
+ * - Supports user touch gestures for rotating and zooming the stadium
+ *
+ * Uses Filament under the hood (via SceneView) to render custom geometry like tubes.
+ */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MANSOOR"
 
-        // Tuning values (change to fine-tune visual match)
-        private const val SCALE = 0.12f          // overall scaling of BallTrack coordinates into scene
-        private const val HEIGHT_BOOST = 1.4f   // add to Y so track starts high above bowler
-        private val STADIUM_OFFSET = Float3(0f, -0.4f, -3.7f) // align with stadium node position
+        /** Scale factor for converting real-world coordinates into SceneView units */
+        private const val SCALE = 0.08f
+
+        /** Lifts the track higher so it starts above the bowler */
+        private const val HEIGHT_BOOST = 1.5f
+
+        /** Offset for stadium alignment and ground reference */
+        private val STADIUM_OFFSET = Float3(0f, -0.4f, -2.5f)
     }
 
     private lateinit var sceneView: SceneView
@@ -44,7 +61,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    // touch / orbit state
+    // Touch controls state variables
     private var lastTouchX = 0f
     private var lastTouchY = 0f
     private var rotationY = 0f   // horizontal orbit (degrees)
@@ -52,7 +69,9 @@ class MainActivity : AppCompatActivity() {
     private var lastDistance = 0f
     private var scaleFactor = 1.0f
 
+    private var ballNode: SphereNode? = null
     private lateinit var gestureDetector: GestureDetector
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,22 +79,30 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         sceneView = binding.sceneView
-        val btnBallTrack= binding.btnBallTrack
+        val btnBallTrack = binding.btnBallTrack
 
+        // Gesture detector for double-tap reset
         gestureDetector = GestureDetector(this, GestureListener())
 
+        // Load 3D model of stadium
         loadStadiumModel()
 
+        // Button triggers ball track drawing
         btnBallTrack.setOnClickListener {
-            Toast.makeText(this, "Button Clicked", Toast.LENGTH_SHORT).show()
             drawBallTrackFromParameters()
         }
-
+        // Initialize orbit + zoom gestures
         setupTouchControls()
     }
 
-    // ---------- Model loading ----------
-    private fun loadStadiumModel() {
+
+    // ---------------------------------------------------------------------------------------------
+    // 1. MODEL LOADING
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Loads the 3D stadium model (GLB file) and adds it to the SceneView.
+     */    private fun loadStadiumModel() {
         val modelLoader = sceneView.modelLoader
         val modelInstance: ModelInstance? = try {
             modelLoader.createModelInstance(assetFileLocation = "models/stadium.glb")
@@ -86,7 +113,7 @@ class MainActivity : AppCompatActivity() {
 
         modelNode = modelInstance?.let {
             ModelNode(modelInstance = it).apply {
-                // model position and scale
+                // Position and scale to align visually in the scene
                 position = Float3(0f, -0.5f, -3.7f)
                 scale = Float3(0.3f, 0.3f, 0.3f)
                 rotation = Rotation(0f, 0f, 0f)
@@ -96,21 +123,31 @@ class MainActivity : AppCompatActivity() {
         modelNode?.let { sceneView.addChildNode(it) }
     }
 
-    // ---------- Ball track: 2 arcs (auto bounce with ground detection) ----------
-    private fun drawBallTrackFromParameters() {
+    // ---------------------------------------------------------------------------------------------
+    // 2. BALL TRACK GENERATION
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Draws a two-part ball path (pre-bounce and post-bounce).
+     * It detects where the ball hits the ground using Y-values, and then draws two arcs:
+     * one before bounce, one after (reflected trajectory).
+     */    private fun drawBallTrackFromParameters() {
         val engine = sceneView.engine
+
+        // Materials for arcs (red)
         val material = sceneView.materialLoader.createColorInstance(Color(1f, 0f, 0f, 1f))
 
+        // Polynomial coefficients for X, Y, Z over time (t)
         val parameterX = floatArrayOf(0.000054f, 0.000054f, -0.95f)
         val parameterY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
         val parameterZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
 
-        val minFrameIdx = -100.0f
-        val maxFrameIdx = 500.0f
+        val minFrameIdx = 0.0f
+        val maxFrameIdx = 300.0f
         val step = 1.0f
 
         // Visual ground in WORLD coordinates (matches how we render with SCALE + HEIGHT_BOOST + STADIUM_OFFSET)
-        val yGroundWorld = -20.0f
+        val yGroundWorld = STADIUM_OFFSET.y + 0.5f // ground level = stadium base
 
         // find bounceFrame using same transforms used for drawing (so bounce corresponds to visible ground)
         var bounceFrame: Float? = null
@@ -131,29 +168,50 @@ class MainActivity : AppCompatActivity() {
             t += step
         }
 
+        // If bounce not found, abort
         if (bounceFrame == null) {
-            Log.e(TAG, "⚠️ No ground crossing found in world coords. Cannot draw a two-part arc. prevWorldY=$prevWorldY")
+            Log.e(TAG,"No ground crossing found in world coords. Cannot draw a two-part arc. prevWorldY=$prevWorldY")
             Toast.makeText(this, "No ground crossing found.", Toast.LENGTH_SHORT).show()
             return
         }
 
-        Log.d(TAG, "✅ Bounce detected near t=$bounceFrame (worldY near ${worldYAt(bounceFrame)})")
 
+        // Build both paths (before and after bounce)
         val preBouncePath = buildBallPath(
             parameterX, parameterY, parameterZ,
-            minFrameIdx, bounceFrame, step, postBounce = false
+            minFrameIdx, bounceFrame, step, isPostBounce = false
         )
 
         val postBouncePath = buildBallPath(
             parameterX, parameterY, parameterZ,
-            bounceFrame, maxFrameIdx, step, postBounce = true
+            bounceFrame, maxFrameIdx, step, isPostBounce = true
         )
 
-        Log.d(TAG, "Pre path size=${preBouncePath.size}, Post path size=${postBouncePath.size}")
+        // Draw both parts of the trajectory
         if (preBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, preBouncePath)
         if (postBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, postBouncePath)
+
+        // Combine both paths for animation
+        val combinedPath = mutableListOf<Float3>().apply {
+            addAll(preBouncePath)
+            addAll(postBouncePath)
+        }
+
+        // Animate ball along the path
+        animateBallAlongPath(combinedPath)
+
     }
 
+    private fun clearOldPaths() {
+        modelNode?.childNodes?.toList()?.forEach {
+            if (it !is ModelNode) modelNode?.removeChildNode(it)
+        }
+    }
+
+    /**
+     * Builds either the pre-bounce or post-bounce trajectory.
+     * For post-bounce, it reflects Y-velocity to simulate a bounce.
+     */
     private fun buildBallPath(
         parameterX: FloatArray,
         parameterY: FloatArray,
@@ -161,60 +219,115 @@ class MainActivity : AppCompatActivity() {
         startT: Float,
         endT: Float,
         step: Float,
-        postBounce: Boolean
+        isPostBounce: Boolean,
     ): List<Float3> {
         val path = mutableListOf<Float3>()
         var t = startT
 
-        // keep consistent base scale; tweak post-bounce visually
-        val heightBoost = if (postBounce) HEIGHT_BOOST * 0.25f else HEIGHT_BOOST
-        val scaleZ = if (postBounce) SCALE * 0.7f else SCALE * 0.8f
+        if (!isPostBounce) {
+            // Pre-bounce: use original trajectory
+            while (t <= endT) {
+                val x = parameterX[0] * t * t + parameterX[1] * t + parameterX[2]
+                val y = parameterY[0] * t * t + parameterY[1] * t + parameterY[2]
+                val z = parameterZ[0] * t * t + parameterZ[1] * t + parameterZ[2]
 
-        if (postBounce) {
-            // Use the *startT* (which is the bounce frame) to compute the first point,
-            // not endT (that was the bug).
-            val bouncePointT = startT
-            val bouncePoint = Float3(
-                parameterX[0] * bouncePointT * bouncePointT + parameterX[1] * bouncePointT + parameterX[2],
-                parameterY[0] * bouncePointT * bouncePointT + parameterY[1] * bouncePointT + parameterY[2],
-                parameterZ[0] * bouncePointT * bouncePointT + parameterZ[1] * bouncePointT + parameterZ[2]
-            )
-            path.add(
-                Float3(
-                    bouncePoint.x * SCALE + STADIUM_OFFSET.x,
-                    bouncePoint.y * SCALE + heightBoost + STADIUM_OFFSET.y,
-                    -bouncePoint.z * scaleZ + STADIUM_OFFSET.z
-                )
-            )
-            // start slightly after bounce to avoid repeating the same sample
-            t += step
-        }
+                val worldX = x * SCALE + STADIUM_OFFSET.x + 0.01f
+                val worldY = y * SCALE + HEIGHT_BOOST + STADIUM_OFFSET.y
+                val worldZ = z * SCALE + STADIUM_OFFSET.z + 4f
 
-        while (t <= endT) {
-            val x = parameterX[0] * t * t + parameterX[1] * t + parameterX[2]
-            val y = parameterY[0] * t * t + parameterY[1] * t + parameterY[2]
-            val z = parameterZ[0] * t * t + parameterZ[1] * t + parameterZ[2]
+                path.add(Float3(worldX, worldY, worldZ))
+                t += step
+            }
+        } else {
+            // Post-bounce: create reflected trajectory
+            val bounceT = startT
 
-            val p = Float3(
-                x * SCALE + STADIUM_OFFSET.x,
-                y * SCALE + heightBoost + STADIUM_OFFSET.y,
-                -z * scaleZ + STADIUM_OFFSET.z
-            )
-            path.add(p)
-            t += step
+            // Calculate position and velocity at bounce point
+            val bounceX =
+                parameterX[0] * bounceT * bounceT + parameterX[1] * bounceT + parameterX[2]
+            val bounceY =
+                parameterY[0] * bounceT * bounceT + parameterY[1] * bounceT + parameterY[2]
+            val bounceZ =
+                parameterZ[0] * bounceT * bounceT + parameterZ[1] * bounceT + parameterZ[2]
+
+            // Calculate velocity components at bounce (derivative of position)
+            val velX = 2 * parameterX[0] * bounceT + parameterX[1]
+            val velY = 2 * parameterY[0] * bounceT + parameterY[1]
+            val velZ = 2 * parameterZ[0] * bounceT + parameterZ[1]
+
+            // Reflect Y velocity (bounce) with energy loss
+            val reflectedVelY = -velY * 0.9f  // 0.7 = bounce coefficient
+
+            while (t <= endT) {
+                val deltaT = t - bounceT
+
+                // New trajectory starting from bounce point with reflected velocity
+                val x = bounceX + velX * deltaT + parameterX[0] * deltaT * deltaT
+                val y = bounceY + reflectedVelY * deltaT + parameterY[0] * deltaT * deltaT
+                val z = bounceZ + velZ * deltaT + parameterZ[0] * deltaT * deltaT
+
+                val worldX = x * SCALE + STADIUM_OFFSET.x + 0.01f
+                val worldY = y * SCALE + HEIGHT_BOOST + STADIUM_OFFSET.y
+                val worldZ = z * SCALE + STADIUM_OFFSET.z + 4f
+
+                path.add(Float3(worldX, worldY, worldZ))
+                t += step
+            }
         }
 
         return path
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // 3. BALL ANIMATION
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Moves a small white sphere along the given trajectory path.
+     */
+    private fun animateBallAlongPath(path: List<Float3>) {
+        if (path.isEmpty()) return
+        val engine = sceneView.engine
+
+        // Create or reuse the ball node
+        if (ballNode == null) {
+            val ballMaterial = sceneView.materialLoader.createColorInstance(Color(1f, 1f, 1f, 1f))
+            ballNode = SphereNode(engine, radius = 0.12f, materialInstance = ballMaterial)
+            ballNode!!.position = path.first()
+            modelNode?.addChildNode(ballNode!!)
+        }
+
+        // Animate with coroutine for smoothness
+        lifecycleScope.launch {
+            val totalSteps = path.size
+            val durationMs = 1000L // total animation duration
+            val frameDelay = durationMs / totalSteps
+
+            for (i in path.indices) {
+                ballNode?.position = path[i]
+                delay(frameDelay)
+            }
+        }
+    }
 
 
-    // ---------- helper: safely draw tube geometry ----------
-    private fun drawTube(sceneView: SceneView, engine: Engine, material: MaterialInstance, path: List<Float3>) {
+    // ---------------------------------------------------------------------------------------------
+    // 4. GEOMETRY BUILDING (Tube Mesh)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Builds and renders a tubular mesh along the trajectory path.
+     * If Filament mesh creation fails, falls back to drawing short cylinders per segment.
+     */    private fun drawTube(
+        sceneView: SceneView,
+        engine: Engine,
+        material: MaterialInstance,
+        path: List<Float3>,
+    ) {
         if (path.size < 2) return
 
         try {
-            val (vb, ib, ic) = buildTubeMesh(engine, path, 0.05f, 24)
+            val (vb, ib, ic) = buildTubeMesh(engine, path, 0.07f, 34)
             val entity = EntityManager.get().create()
 
             RenderableManager.Builder(1)
@@ -234,9 +347,15 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    // ---------- Mesh builder (returns VertexBuffer, IndexBuffer, indexCount) ----------
-    // Creates direct buffers and returns Filament buffers; throws on error
-    private fun buildTubeMesh(engine: Engine, path: List<Float3>, radius: Float, radialSegments: Int):
+    /**
+     * Constructs vertex and index buffers for a tube geometry that follows a path.
+     */
+    private fun buildTubeMesh(
+        engine: Engine,
+        path: List<Float3>,
+        radius: Float,
+        radialSegments: Int,
+    ):
             Triple<VertexBuffer, IndexBuffer, Int> {
 
         if (path.size < 2) throw IllegalArgumentException("path too short")
@@ -244,7 +363,7 @@ class MainActivity : AppCompatActivity() {
         val verts = ArrayList<Float>(path.size * radialSegments * 3)
         val indices = ArrayList<Short>((path.size - 1) * radialSegments * 6)
 
-        // circle points in local XY plane
+        // Create vertices in circular cross-sections along path
         for (p in path) {
             for (j in 0 until radialSegments) {
                 val angle = 2.0 * PI * j / radialSegments
@@ -256,6 +375,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Connect rings of vertices into triangles
         for (i in 0 until path.size - 1) {
             val row = i * radialSegments
             val next = (i + 1) * radialSegments
@@ -270,6 +390,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Create Filament-compatible buffers
         val vArr = FloatArray(verts.size)
         for (i in verts.indices) vArr[i] = verts[i]
         val iArr = ShortArray(indices.size)
@@ -281,11 +402,18 @@ class MainActivity : AppCompatActivity() {
         val vb = VertexBuffer.Builder()
             .bufferCount(1)
             .vertexCount(vertexCount)
-            .attribute(VertexBuffer.VertexAttribute.POSITION, 0, VertexBuffer.AttributeType.FLOAT3, 0, 12)
+            .attribute(
+                VertexBuffer.VertexAttribute.POSITION,
+                0,
+                VertexBuffer.AttributeType.FLOAT3,
+                0,
+                12
+            )
             .build(engine)
 
         // fill direct ByteBuffer for vertex data
-        val vertexByteBuffer = ByteBuffer.allocateDirect(vArr.size * 4).order(ByteOrder.nativeOrder())
+        val vertexByteBuffer =
+            ByteBuffer.allocateDirect(vArr.size * 4).order(ByteOrder.nativeOrder())
         val vertexFloatBuffer = vertexByteBuffer.asFloatBuffer()
         vertexFloatBuffer.put(vArr)
         vertexFloatBuffer.rewind()
@@ -296,7 +424,8 @@ class MainActivity : AppCompatActivity() {
             .bufferType(IndexBuffer.Builder.IndexType.USHORT)
             .build(engine)
 
-        val indexByteBuffer = ByteBuffer.allocateDirect(iArr.size * 2).order(ByteOrder.nativeOrder())
+        val indexByteBuffer =
+            ByteBuffer.allocateDirect(iArr.size * 2).order(ByteOrder.nativeOrder())
         val indexShortBuffer = indexByteBuffer.asShortBuffer()
         indexShortBuffer.put(iArr)
         indexShortBuffer.rewind()
@@ -306,7 +435,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- fallback drawing (overlapping cylinders) ----------
-    private fun fallbackDrawSegments(sceneView: SceneView, path: List<Float3>, material: MaterialInstance, engine: Engine, radius: Float) {
+    private fun fallbackDrawSegments(
+        sceneView: SceneView,
+        path: List<Float3>,
+        material: MaterialInstance,
+        engine: Engine,
+        radius: Float,
+    ) {
         var last = path.first()
         for (i in 1 until path.size) {
             val current = path[i]
@@ -316,21 +451,40 @@ class MainActivity : AppCompatActivity() {
         // parent fallback segments to stadium so they move together
     }
 
-    private fun drawCylinderSegment(sceneView: SceneView, start: Float3, end: Float3, material: MaterialInstance, engine: Engine, radius: Float, overlap: Float) {
+    private fun drawCylinderSegment(
+        sceneView: SceneView,
+        start: Float3,
+        end: Float3,
+        material: MaterialInstance,
+        engine: Engine,
+        radius: Float,
+        overlap: Float,
+    ) {
         val dx = end.x - start.x
         val dy = end.y - start.y
         val dz = end.z - start.z
         val length = sqrt(dx * dx + dy * dy + dz * dz) * overlap
         val mid = Float3((start.x + end.x) / 2f, (start.y + end.y) / 2f, (start.z + end.z) / 2f)
-        val cyl = CylinderNode(engine = engine, radius = radius, height = length, materialInstance = material)
+        val cyl = CylinderNode(
+            engine = engine,
+            radius = radius,
+            height = length,
+            materialInstance = material
+        )
         cyl.position = mid
         cyl.rotation = Rotation(x = 90f, y = 0f, z = 0f)
         // parent to stadium if available
         modelNode?.addChildNode(cyl) ?: sceneView.addChildNode(cyl)
     }
 
-    // ---------- touch: orbit (drag) + pinch (zoom) ----------
-    private fun setupTouchControls() {
+
+    // ---------------------------------------------------------------------------------------------
+    // 5. TOUCH CONTROLS (Orbit + Zoom + Reset)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Configures touch listeners for single-finger rotate and two-finger pinch zoom.
+     */    private fun setupTouchControls() {
         sceneView.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
             when (event.pointerCount) {
@@ -345,12 +499,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
+    /**
+     * Handles single-finger rotation around Y-axis.
+     */
     private fun handleRotate(event: MotionEvent) {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 lastTouchX = event.x
             }
+
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.x - lastTouchX
                 lastTouchX = event.x
@@ -363,6 +520,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Handles two-finger pinch zoom on the model.
+     */
     private fun handlePinchZoom(event: MotionEvent) {
         if (event.pointerCount < 2) return
         val dx = event.getX(0) - event.getX(1)
@@ -377,14 +537,18 @@ class MainActivity : AppCompatActivity() {
         lastDistance = distance
     }
 
-    // double-tap resets
-    private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
+    /**
+     * Resets rotation and zoom on double-tap gesture.
+     */    private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
             resetView()
             return true
         }
     }
 
+    /**
+     * Restores default camera angle and stadium scale.
+     */
     private fun resetView() {
         rotationX = 0f
         rotationY = 0f

@@ -47,9 +47,10 @@
             android:id="@+id/btnBallTrack"
             android:layout_width="0dp"
             android:layout_height="50dp"
-            android:text="Show Ball Track"
+            android:text="Show ball tracck"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@+id/btnTogglePitch" />
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 </FrameLayout>
