@@ -1,9 +1,13 @@
 package com.example.sceneviewandroid
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
 import android.os.Bundle
 import android.util.Log
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.SurfaceHolder
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -14,6 +18,7 @@ import com.google.android.filament.IndexBuffer
 import com.google.android.filament.MaterialInstance
 import com.google.android.filament.RenderableManager
 import com.google.android.filament.VertexBuffer
+import com.google.android.filament.View
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.SceneView
 import io.github.sceneview.math.Color
@@ -84,8 +89,42 @@ class MainActivity : AppCompatActivity() {
         // Gesture detector for double-tap reset
         gestureDetector = GestureDetector(this, GestureListener())
 
+        sceneView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        sceneView.holder.setFormat(PixelFormat.TRANSLUCENT)
+        sceneView.uiHelper.isOpaque = false
+        sceneView.view.blendMode = View.BlendMode.TRANSLUCENT
+        sceneView.scene.skybox = null
+
+        val options = sceneView.renderer.clearOptions
+        options.clear = true
+        sceneView.renderer.clearOptions = options
+
+        sceneView.view.dynamicResolutionOptions =
+            View.DynamicResolutionOptions().apply {
+                enabled = true
+                quality = View.QualityLevel.LOW
+            }
+
+
         // Load 3D model of stadium
         loadStadiumModel()
+
+        binding.btnHideShowStadium.setOnClickListener {
+            if (modelNode?.isVisible == true) {
+                binding.btnHideShowStadium.text = "Show Stadium"
+                modelNode?.isVisible = false
+            } else {
+                binding.btnHideShowStadium.text = "Hide Stadium"
+                modelNode?.isVisible = true
+            }
+        }
+
+        var isPitchVisible = true // default state (you can set to false if needed)
+
+        binding.btnTogglePitch.setOnClickListener {
+            isPitchVisible = !isPitchVisible
+            togglePitchVisibility(isPitchVisible)
+        }
 
         // Button triggers ball track drawing
         btnBallTrack.setOnClickListener {
@@ -93,6 +132,78 @@ class MainActivity : AppCompatActivity() {
         }
         // Initialize orbit + zoom gestures
         setupTouchControls()
+
+        // Add a callback to handle drawing
+        binding.surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                drawImage(holder)
+            }
+
+            override fun surfaceChanged(
+                holder: SurfaceHolder,
+                format: Int,
+                width: Int,
+                height: Int,
+            ) {
+                drawImage(holder)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {}
+        })
+
+
+    }
+
+    private fun drawImage(holder: SurfaceHolder) {
+        val canvas = holder.lockCanvas()
+        if (canvas != null) {
+            val bitmap = BitmapFactory.decodeResource(resources, R.drawable.sample_image)
+
+            // Scale the image to fit the SurfaceView
+            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, canvas.width, canvas.height, true)
+
+            // Draw the image
+            canvas.drawBitmap(scaledBitmap, 0f, 0f, null)
+
+            holder.unlockCanvasAndPost(canvas)
+        }
+    }
+
+
+    private fun togglePitchVisibility(showPitch: Boolean) {
+        // These (commented in your code) should be SHOWN when showPitch = true
+        val toShow = listOf(
+            "Crease", "creaseline_1", "bowl_crease_1", "pop_crease_1",
+            "prot_area_11", "prot_area_12", "prot_area_13", "prot_area_14",
+            "stump_1", "Stump01", "Stump02", "Stump03",
+            "stumpstrike1", "stumpstrike2", "wide_line_11", "wide_line_12",
+            "creaseline_2", "bowl_crease_2", "pop_crease_2",
+            "prot_area_21", "prot_area_22", "prot_area_23", "prot_area_24",
+            "ret_crease_21", "ret_crease_22", "stump_2",
+            "Stump04", "Stump05", "Stump06",
+            "stumpstrike004", "stumpstrike005",
+            "wide_line_21", "wide_line_22",
+            "boundary_crease", "outer_ground", "Light", "ret_crease_11", "ret_crease_12",
+        )
+
+        // These (uncommented in your code) should be HIDDEN when showPitch = true
+        val toHide = listOf(
+            "stadium",
+            "boundary board", "boundary board.002", "boundary board.003",
+            "boundary board.004", "boundary board.005", "boundary board.006",
+            "boundary board.007", "boundary board.008", "boundary board.009",
+            "boundary board.010", "boundary_crease", "outer_ground",
+            "pitch"
+        )
+
+        if (showPitch) {
+            toShow.forEach { setModelPartVisibility(it, true) }
+            toHide.forEach { setModelPartVisibility(it, false) }
+        } else {
+            toShow.forEach { setModelPartVisibility(it, true) }
+            toHide.forEach { setModelPartVisibility(it, true) }
+        }
+
     }
 
 
@@ -102,14 +213,16 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Loads the 3D stadium model (GLB file) and adds it to the SceneView.
-     */    private fun loadStadiumModel() {
+     */
+    private fun loadStadiumModel() {
         val modelLoader = sceneView.modelLoader
         val modelInstance: ModelInstance? = try {
-            modelLoader.createModelInstance(assetFileLocation = "models/stadium.glb")
+            modelLoader.createModelInstance(assetFileLocation = "models/stadium_new.glb")
         } catch (e: Exception) {
             Log.e(TAG, "Model load failed: ${e.message}", e)
             null
         }
+
 
         modelNode = modelInstance?.let {
             ModelNode(modelInstance = it).apply {
@@ -123,6 +236,56 @@ class MainActivity : AppCompatActivity() {
         modelNode?.let { sceneView.addChildNode(it) }
     }
 
+    private fun setModelPartVisibility(partName: String, visible: Boolean) {
+        val asset = modelNode?.modelInstance?.asset ?: return
+        val rm = sceneView.engine.renderableManager
+
+        asset.getEntitiesByName(partName).forEach { entity ->
+            val ri = rm.getInstance(entity)
+            if (ri != 0) {
+                // Toggle layer visibility
+                rm.setLayerMask(ri, 0xFF, if (visible) 0xFF else 0x00)
+            }
+        }
+    }
+
+    private fun setModelPartVisibilityRecursive(partName: String, visible: Boolean) {
+        val asset = modelNode?.modelInstance?.asset ?: return
+        val rm = sceneView.engine.renderableManager
+        val tm = sceneView.engine.transformManager
+
+        // Get all entities that match the name
+        val entities = asset.getEntitiesByName(partName)
+        if (entities.isEmpty()) {
+            Log.w("ModelVisibility", "No entities found for: $partName")
+            return
+        }
+
+        // Build a recursive function to hide all child entities
+        fun hideEntityTree(entity: Int) {
+            val ri = rm.getInstance(entity)
+            if (ri != 0) {
+                // hide/show renderable entity
+                rm.setLayerMask(ri, 0xFF, if (visible) 0xFF else 0x00)
+            }
+
+            // Traverse children
+            val ti = tm.getInstance(entity)
+            if (ti != 0) {
+                val childCount = tm.getChildCount(ti)
+                val children = IntArray(childCount)
+                tm.getChildren(ti, entities)
+                for (child in children) hideEntityTree(child)
+            }
+        }
+
+        // Start from each matching root
+        for (entity in entities) hideEntityTree(entity)
+
+        Log.d("ModelVisibility", "Stadium '$partName' visibility set to $visible (recursive)")
+    }
+
+
     // ---------------------------------------------------------------------------------------------
     // 2. BALL TRACK GENERATION
     // ---------------------------------------------------------------------------------------------
@@ -131,7 +294,8 @@ class MainActivity : AppCompatActivity() {
      * Draws a two-part ball path (pre-bounce and post-bounce).
      * It detects where the ball hits the ground using Y-values, and then draws two arcs:
      * one before bounce, one after (reflected trajectory).
-     */    private fun drawBallTrackFromParameters() {
+     */
+    private fun drawBallTrackFromParameters() {
         val engine = sceneView.engine
 
         // Materials for arcs (red)
@@ -170,7 +334,10 @@ class MainActivity : AppCompatActivity() {
 
         // If bounce not found, abort
         if (bounceFrame == null) {
-            Log.e(TAG,"No ground crossing found in world coords. Cannot draw a two-part arc. prevWorldY=$prevWorldY")
+            Log.e(
+                TAG,
+                "No ground crossing found in world coords. Cannot draw a two-part arc. prevWorldY=$prevWorldY"
+            )
             Toast.makeText(this, "No ground crossing found.", Toast.LENGTH_SHORT).show()
             return
         }
@@ -318,7 +485,8 @@ class MainActivity : AppCompatActivity() {
     /**
      * Builds and renders a tubular mesh along the trajectory path.
      * If Filament mesh creation fails, falls back to drawing short cylinders per segment.
-     */    private fun drawTube(
+     */
+    private fun drawTube(
         sceneView: SceneView,
         engine: Engine,
         material: MaterialInstance,
@@ -484,7 +652,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Configures touch listeners for single-finger rotate and two-finger pinch zoom.
-     */    private fun setupTouchControls() {
+     */
+    private fun setupTouchControls() {
         sceneView.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
             when (event.pointerCount) {
@@ -513,7 +682,7 @@ class MainActivity : AppCompatActivity() {
                 lastTouchX = event.x
                 rotationY += dx * 0.5f
 
-                // ✅ SceneView uses 'rotation' instead of 'localRotation'
+                // SceneView uses 'rotation' instead of 'localRotation'
                 // Rotation(y = angleInDegrees) rotates around Y-axis
                 modelNode?.rotation = Rotation(y = rotationY)
             }
@@ -539,7 +708,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Resets rotation and zoom on double-tap gesture.
-     */    private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
+     */
+    private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
             resetView()
             return true

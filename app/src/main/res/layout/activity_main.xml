@@ -1,56 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    android:layout_height="match_parent">
 
-    <!-- Video overlay -->
-    <io.github.sceneview.SceneView
-        android:id="@+id/sceneView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
 
-    <androidx.media3.ui.PlayerView
-        android:id="@+id/videoView"
+    <SurfaceView
+        android:id="@+id/surfaceView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone"/>
+        android:background="@android:color/transparent" />
+
+
+    <!-- SceneView for 3D model - TRANSPARENT background -->
+    <io.github.sceneview.SceneView
+        android:id="@+id/sceneView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
+
 
     <!-- Buttons -->
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
+        android:layout_marginBottom="50dp"
         android:gravity="center"
-        android:clickable="false"
-        android:layout_marginBottom="20dp"
-        android:padding="16dp">
+        android:orientation="horizontal">
 
         <Button
-            android:id="@+id/btnPlayVideo"
+            android:id="@+id/btnBallTrack"
+            android:layout_width="wrap_content"
             android:layout_height="50dp"
-            android:layout_width="0dp"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
-            android:text="Play Video"/>
+            android:layout_marginEnd="8dp"
+            android:text="Ball Track"/>
 
         <Button
             android:id="@+id/btnTogglePitch"
             android:layout_width="wrap_content"
             android:layout_height="50dp"
-            android:text="Show Pitch"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toEndOf="@+id/btnPlayVideo" />
+            android:layout_marginEnd="8dp"
+            android:text="Show Pitch"/>
 
         <Button
-            android:id="@+id/btnBallTrack"
-            android:layout_width="0dp"
+            android:id="@+id/btnHideShowStadium"
+            android:layout_width="wrap_content"
             android:layout_height="50dp"
-            android:text="Show ball tracck"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toEndOf="@+id/btnTogglePitch" />
+            android:text="Hide Stadium" />
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+    </LinearLayout>
 </FrameLayout>
