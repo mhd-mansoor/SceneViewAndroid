@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
 
-    <SurfaceView
-        android:id="@+id/surfaceView"
+    <androidx.media3.ui.AspectRatioFrameLayout
+        android:id="@+id/videoFrame"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@android:color/transparent" />
+        android:background="@android:color/black"
+        app:resize_mode="fill">
+
+        <SurfaceView
+            android:id="@+id/surfaceView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center" />
+    </androidx.media3.ui.AspectRatioFrameLayout>
+
 
 
     <!-- SceneView for 3D model - TRANSPARENT background -->
@@ -28,24 +38,24 @@
         android:orientation="horizontal">
 
         <Button
-            android:id="@+id/btnBallTrack"
+            android:id="@+id/btnPlatVideo"
             android:layout_width="wrap_content"
             android:layout_height="50dp"
             android:layout_marginEnd="8dp"
-            android:text="Ball Track"/>
+            android:text="Play Video"/>
 
         <Button
             android:id="@+id/btnTogglePitch"
             android:layout_width="wrap_content"
             android:layout_height="50dp"
             android:layout_marginEnd="8dp"
-            android:text="Show Pitch"/>
+            android:text="Toggle Pitch"/>
 
         <Button
-            android:id="@+id/btnHideShowStadium"
+            android:id="@+id/btnAnimateBall"
             android:layout_width="wrap_content"
             android:layout_height="50dp"
-            android:text="Hide Stadium" />
+            android:text="Animate Ball" />
 
     </LinearLayout>
 </FrameLayout>
