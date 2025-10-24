@@ -156,6 +156,7 @@
             // Initialize orbit + zoom gestures
             setupTouchControls()
 
+
             // New: Button to add impact dots
             binding.btnAddImpactDots.setOnClickListener {
                 addSampleImpactDots()
@@ -166,8 +167,8 @@
             }
 
             // Add this to your onCreate method after other buttons
-            binding.btnDebugPitch.setOnClickListener {
-//                drawSimpleRectangle()
+            binding.btnMultipleTrack.setOnClickListener {
+                drawMultipleBallTracks()
             }
         }
 
@@ -542,9 +543,94 @@
 
         }
 
-        private fun clearOldPaths() {
-            modelNode?.childNodes?.toList()?.forEach {
-                if (it !is ModelNode) modelNode?.removeChildNode(it)
+        private fun drawBallTrack(
+            parameterX: FloatArray,
+            parameterY: FloatArray,
+            parameterZ: FloatArray,
+            color: Color
+        ) {
+            val engine = sceneView.engine
+            val material = sceneView.materialLoader.createColorInstance(color)
+
+            val minFrameIdx = 0.0f
+            val maxFrameIdx = 300.0f
+            val step = 1.0f
+            val yGroundWorld = STADIUM_OFFSET.y + 0.5f
+
+            fun worldYAt(tVal: Float): Float {
+                val rawY = parameterY[0] * tVal * tVal + parameterY[1] * tVal + parameterY[2]
+                return rawY * SCALE + HEIGHT_BOOST + STADIUM_OFFSET.y
+            }
+
+            // find bounce frame
+            var bounceFrame: Float? = null
+            var t = minFrameIdx
+            var prevWorldY = worldYAt(t)
+            while (t <= maxFrameIdx) {
+                val worldY = worldYAt(t)
+                if (prevWorldY > yGroundWorld && worldY <= yGroundWorld) {
+                    bounceFrame = t
+                    break
+                }
+                prevWorldY = worldY
+                t += step
+            }
+
+            if (bounceFrame == null) return
+
+            val preBouncePath = buildBallPath(parameterX, parameterY, parameterZ, minFrameIdx, bounceFrame, step, false)
+            val postBouncePath = buildBallPath(parameterX, parameterY, parameterZ, bounceFrame, maxFrameIdx, step, true)
+
+            if (preBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, preBouncePath)
+            if (postBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, postBouncePath)
+
+            val combinedPath = mutableListOf<Float3>().apply {
+                addAll(preBouncePath)
+                addAll(postBouncePath)
+            }
+
+            animateBallAlongPath(combinedPath)
+        }
+
+        private fun drawMultipleBallTracks() {
+            val baseX = floatArrayOf(0.00003f, 0.00003f, -0.95f)
+            val baseY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
+            val baseZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
+
+            val colors = listOf(
+                Color(1f, 0f, 0f, 1f),
+                Color(1f, 0f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 1f, 1f, 1f),
+                Color(0f, 0f, 0f, 1f),
+                Color(0f, 0f, 1f, 1f),
+                Color(0f, 1f, 0f, 1f),
+                Color(0f, 1f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 0f, 0f, 1f),
+                Color(0f, 1f, 0f, 1f),
+                Color(1f, 0f, 0f, 1f),
+                Color(0f, 1f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f)
+            )
+
+            repeat(15) { i ->
+                val variation = (i - 2) * 2f  // spread tracks horizontally
+
+                val parameterX = baseX.clone().apply {
+                    this[2] += variation   // shift starting X
+                }
+
+                val parameterY = baseY.clone().apply {
+                    this[1] += (Math.random().toFloat() - 0.5f) * 0.02f  // vary height slightly
+                }
+
+                val parameterZ = baseZ.clone().apply {
+                    this[2] += (Math.random().toFloat() - 0.5f) * 0.3f   // vary depth slightly
+                }
+
+                drawBallTrack(parameterX, parameterY, parameterZ, colors[i])
             }
         }
 
@@ -625,7 +711,7 @@
         /**
          * Moves a small white sphere along the given trajectory path.
          */
-        private fun animateBallAlongPath(path: List<Float3>) {
+        private fun animateBallAlongPaths(path: List<Float3>) {
             if (path.isEmpty()) return
             val engine = sceneView.engine
 
@@ -648,6 +734,48 @@
                     delay(frameDelay)
                 }
             }
+        }
+
+        private fun animateBallAlongPath(path: List<Float3>, color: Color = Color(1f, 1f, 1f, 1f)) {
+            if (path.size < 2) return
+            val engine = sceneView.engine
+
+            // create a new ball per path (if animating multiple balls)
+            val ballMaterial = sceneView.materialLoader.createColorInstance(color)
+            val ballNode = SphereNode(engine, radius = 0.1f, materialInstance = ballMaterial)
+            ballNode.position = path.first()
+            modelNode?.addChildNode(ballNode)
+
+            lifecycleScope.launch {
+                val totalDurationMs = 2000L
+                val frameRate = 60
+                val frameDelay = 1000L / frameRate
+                val totalFrames = (totalDurationMs / frameDelay).toInt()
+
+                for (frame in 0 until totalFrames) {
+                    val progress = frame.toFloat() / (totalFrames - 1)
+                    val scaledT = progress * (path.size - 1)
+
+                    val idx = scaledT.toInt().coerceIn(0, path.size - 2)
+                    val t = scaledT - idx
+
+                    val pos = lerpFloat3(path[idx], path[idx + 1], t)
+                    ballNode.position = pos
+
+                    delay(frameDelay)
+                }
+
+                // Optionally keep the ball at last position
+                ballNode.position = path.last()
+            }
+        }
+
+        private fun lerpFloat3(start: Float3, end: Float3, t: Float): Float3 {
+            return Float3(
+                start.x + (end.x - start.x) * t,
+                start.y + (end.y - start.y) * t,
+                start.z + (end.z - start.z) * t
+            )
         }
 
 
