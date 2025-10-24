@@ -1,7 +1,5 @@
     package com.example.sceneviewandroid
-    
-    import android.graphics.Bitmap
-    import android.graphics.BitmapFactory
+
     import android.graphics.PixelFormat
     import android.os.Bundle
     import android.util.Log
@@ -27,7 +25,6 @@
     import io.github.sceneview.SceneView
     import io.github.sceneview.math.Color
     import io.github.sceneview.math.Rotation
-    import io.github.sceneview.model.ModelInstance
     import io.github.sceneview.node.CylinderNode
     import io.github.sceneview.node.ModelNode
     import io.github.sceneview.node.Node
@@ -40,6 +37,8 @@
     import kotlin.math.cos
     import kotlin.math.sin
     import kotlin.math.sqrt
+    import kotlin.random.Random
+    import android.graphics.Color as mColor
 
     /**
      * Main activity that:
@@ -51,20 +50,20 @@
      * Uses Filament under the hood (via SceneView) to render custom geometry like tubes.
      */
     class MainActivity : AppCompatActivity() {
-    
+
         companion object {
             private const val TAG = "MANSOOR"
-    
+
             /** Scale factor for converting real-world coordinates into SceneView units */
             private const val SCALE = 0.08f
-    
+
             /** Lifts the track higher so it starts above the bowler */
             private const val HEIGHT_BOOST = 1.5f
-    
+
             /** Offset for stadium alignment and ground reference */
             private val STADIUM_OFFSET = Float3(0f, -0.4f, -2.5f)
         }
-    
+
         private lateinit var sceneView: SceneView
         private var modelNode: ModelNode? = null
 
@@ -74,10 +73,10 @@
         private lateinit var player: ExoPlayer
 
         private lateinit var surfaceView: SurfaceView
-
-
         private lateinit var binding: ActivityMainBinding
-    
+
+        private var pitchMapOverlayNode: Node? = null
+
         // Touch controls state variables
         private var lastTouchX = 0f
         private var lastTouchY = 0f
@@ -91,22 +90,22 @@
         private var initialModelScale: Float3? = null
         private var initialModelRotation: Rotation? = null
 
-
+        // New: Pitch overlay and impact dots
+        private var pitchRegionNode: Node? = null
+        private val impactDots = mutableListOf<SphereNode>()
         private var ballNode: SphereNode? = null
-
         private var pivotNode: Node? = null
-
         private lateinit var gestureDetector: GestureDetector
-    
-    
+
+
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
             binding = ActivityMainBinding.inflate(layoutInflater)
             setContentView(binding.root)
-    
+
             sceneView = binding.sceneView
             val btnAnimateBall = binding.btnAnimateBall
-    
+
             // Gesture detector for double-tap reset
             gestureDetector = GestureDetector(this, GestureListener())
             sceneView.setZOrderMediaOverlay(true)
@@ -119,7 +118,7 @@
             val options = sceneView.renderer.clearOptions
             options.clear = true
             sceneView.renderer.clearOptions = options
-    
+
             sceneView.view.dynamicResolutionOptions =
                 View.DynamicResolutionOptions().apply {
                     enabled = true
@@ -156,7 +155,145 @@
             }
             // Initialize orbit + zoom gestures
             setupTouchControls()
+
+            // New: Button to add impact dots
+            binding.btnAddImpactDots.setOnClickListener {
+                addSampleImpactDots()
+            }
+
+            // New: Button to toggle pitch region
+            binding.btnTogglePitchRegion.setOnClickListener {
+            }
+
+            // Add this to your onCreate method after other buttons
+            binding.btnDebugPitch.setOnClickListener {
+//                drawSimpleRectangle()
+            }
         }
+
+
+        // Pitch Data
+        /*val pitchLengthMarkers = arrayOf(
+            PitchLengthMarker(
+                text = "STUMPS",
+                position = Float3(1.855f, 0f, -10.06f + 1.5f / 2),
+                deliveryLengthRegion = DeliveryLengthRegion(
+                    height = 1.5f,
+                    color = mColor.parseColor("#B0AB60"),
+                    name = "Yorker"
+                )
+            ),
+            PitchLengthMarker(text = "2M", position = Float3(1.855f, 0f, -8.06f)),
+            PitchLengthMarker(
+                text = "",
+                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f / 2),
+                deliveryLengthRegion = DeliveryLengthRegion(
+                    height = 3.0f,
+                    color = mColor.parseColor("#9DB978"),
+                    name = "Full"
+                )
+            ),
+            PitchLengthMarker(text = "4M", position = Float3(1.855f, 0f, -6.06f)),
+            PitchLengthMarker(
+                text = "",
+                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f + 3.0f / 2),
+                deliveryLengthRegion = DeliveryLengthRegion(
+                    height = 3.0f,
+                    color = mColor.parseColor("#D99A96"),
+                    name = "Good"
+                )
+            ),
+            PitchLengthMarker(text = "6M", position = Float3(1.855f, 0f, -4.06f)),
+            PitchLengthMarker(text = "8M", position = Float3(1.855f, 0f, -2.06f)),
+            PitchLengthMarker(
+                text = "",
+                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f + 3.0f + 12.06f / 2),
+                deliveryLengthRegion = DeliveryLengthRegion(
+                    height = 12.06f,
+                    color = mColor.parseColor("#9BC4E2"), // pick your short color
+                    name = "Short"
+                )
+            ),
+            PitchLengthMarker(text = "HALFWAY", position = Float3(1.855f, 0f, 0f))
+        )*/
+
+
+        fun generateSpacedPositions(): List<Float3> {
+            val random = Random(System.currentTimeMillis())
+            val positions = mutableListOf<Float3>()
+
+            repeat(1000) {
+                val x = random.nextFloat() * 4f - 2f       // X between -2 and +2
+                val y = 0.1f + random.nextFloat() * 0.03f - 0.01f // Y around 0.1 ± 0.01
+                val z = random.nextFloat() * 12f - 6f       // Z between -6 and +1
+                positions += Float3(x, y, z)
+            }
+
+            return positions
+        }
+
+        /**
+         * Adds sample impact dots at strategic positions on the pitch
+         * You can modify these coordinates based on your actual impact data
+         */
+        private fun addSampleImpactDots() {
+            // Clear existing dots
+            clearImpactDots()
+
+            Log.d("MANSOOR", "addSampleImpactDots: ${generateSpacedPositions().size}")
+            generateSpacedPositions().forEach { position ->
+                addImpactDot(position)
+            }
+
+        }
+
+        /**
+         * Adds a single impact dot at the specified position
+         */
+        private fun addImpactDot(position: Float3) {
+            val engine = sceneView.engine
+
+            // Create red material for impact dots
+            val dotMaterial = sceneView.materialLoader.createColorInstance(Color(1f, 0f, 0f, 1f))
+
+            val impactDot = SphereNode(
+                engine = engine,
+                radius = 0.05f, // Small sphere for impact dot
+                materialInstance = dotMaterial
+            ).apply {
+                this.position = position
+                // Position slightly above pitch to avoid z-fighting
+            }
+
+            // Add to model node so it moves with the stadium
+            modelNode?.addChildNode(impactDot) ?: sceneView.addChildNode(impactDot)
+            impactDots.add(impactDot)
+        }
+
+
+
+        /**
+         * Clears all impact dots
+         */
+        private fun clearImpactDots() {
+            impactDots.forEach { dot ->
+                modelNode?.removeChildNode(dot)
+                dot.destroy()
+            }
+            impactDots.clear()
+        }
+
+        /**
+         * Updates impact dots based on new tracking data
+         * @param positions List of impact positions in pitch coordinates
+         */
+        fun updateImpactDots(positions: List<Float3>) {
+            clearImpactDots()
+            positions.forEach { position ->
+                addImpactDot(position)
+            }
+        }
+
 
         private fun initializePlayer() {
             player = ExoPlayer.Builder(this).build()
@@ -786,6 +923,9 @@
         }
 
         override fun onDestroy() {
+            clearImpactDots()
+            super.onDestroy()
+
             sceneView.destroy()
             exoPlayer?.release()
             exoPlayer = null

@@ -40,7 +40,6 @@ android {
         jvmTarget = "17"
     }
 
-
 }
 
 dependencies {
@@ -51,12 +50,10 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
 
-//    implementation(libs.sceneform)
     implementation(libs.sceneview)
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
-
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
