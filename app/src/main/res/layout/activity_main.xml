@@ -81,16 +81,16 @@
             android:layout_height="50dp"
             android:text="ball dots"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toStartOf="@+id/btnDebugPitch"
+            app:layout_constraintEnd_toStartOf="@+id/btnMultipleTrack"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
 
         <Button
-            android:id="@+id/btnDebugPitch"
+            android:id="@+id/btnMultipleTrack"
             android:layout_width="0dp"
             android:layout_height="50dp"
-            android:text="Debug"
+            android:text="multple track"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toStartOf="@+id/btnTogglePitchRegion"
             app:layout_constraintStart_toEndOf="@+id/btnAddImpactDots"
@@ -103,7 +103,7 @@
             android:text="pitch map"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toEndOf="@+id/btnDebugPitch"
+            app:layout_constraintStart_toEndOf="@+id/btnMultipleTrack"
             app:layout_constraintTop_toTopOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 

@@ -1,12 +1,20 @@
     package com.example.sceneviewandroid
 
+    import android.graphics.Bitmap
+    import android.graphics.Canvas
+    import android.graphics.Paint
     import android.graphics.PixelFormat
+    import android.graphics.Rect
+    import android.graphics.Typeface
     import android.os.Bundle
     import android.util.Log
+    import android.util.TypedValue
     import android.view.GestureDetector
+    import android.view.Gravity
     import android.view.MotionEvent
     import android.view.SurfaceHolder
     import android.view.SurfaceView
+    import android.widget.TextView
     import android.widget.Toast
     import androidx.appcompat.app.AppCompatActivity
     import androidx.core.net.toUri
@@ -19,6 +27,7 @@
     import com.google.android.filament.IndexBuffer
     import com.google.android.filament.MaterialInstance
     import com.google.android.filament.RenderableManager
+    import com.google.android.filament.Texture
     import com.google.android.filament.VertexBuffer
     import com.google.android.filament.View
     import dev.romainguy.kotlin.math.Float3
@@ -29,8 +38,10 @@
     import io.github.sceneview.node.ModelNode
     import io.github.sceneview.node.Node
     import io.github.sceneview.node.SphereNode
+    import io.github.sceneview.node.ViewNode2
     import kotlinx.coroutines.delay
     import kotlinx.coroutines.launch
+    import java.lang.reflect.Type
     import java.nio.ByteBuffer
     import java.nio.ByteOrder
     import kotlin.math.PI
@@ -39,6 +50,7 @@
     import kotlin.math.sqrt
     import kotlin.random.Random
     import android.graphics.Color as mColor
+    import android.view.View as mView
 
     /**
      * Main activity that:
@@ -52,6 +64,10 @@
     class MainActivity : AppCompatActivity() {
 
         companion object {
+
+            private const val MIN_ROTATION_Y = -45f  // Pitch 1 view
+            private const val MAX_ROTATION_Y = 45f   // Pitch 2 view
+            private const val TOP_VIEW_ROTATION_X = -30f  // Top view tilt
             private const val TAG = "MANSOOR"
 
             /** Scale factor for converting real-world coordinates into SceneView units */
@@ -109,7 +125,7 @@
             // Gesture detector for double-tap reset
             gestureDetector = GestureDetector(this, GestureListener())
             sceneView.setZOrderMediaOverlay(true)
-            sceneView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            sceneView.setBackgroundColor(mColor.TRANSPARENT)
             sceneView.holder.setFormat(PixelFormat.TRANSLUCENT)
             sceneView.uiHelper.isOpaque = false
             sceneView.view.blendMode = View.BlendMode.TRANSLUCENT
@@ -129,6 +145,8 @@
             // Load 3D model of stadium
             loadStadiumModel()
 
+//            drawPitchLabels()
+
             binding.btnPlatVideo.setOnClickListener {
                 if (player.isPlaying) {
                     stopVideo()
@@ -137,24 +155,25 @@
                 }
 
             }
-    
+
             binding.btnTogglePitch.setOnClickListener {
                 modelNode?.isVisible = modelNode?.isVisible != true
             }
-    
+
             var isPitchVisible = true // default state (you can set to false if needed)
-    
+
             binding.btnTogglePitch.setOnClickListener {
                 isPitchVisible = !isPitchVisible
                 togglePitchVisibility(isPitchVisible)
             }
-    
+
             // Button triggers ball track drawing
             btnAnimateBall.setOnClickListener {
                 drawBallTrackFromParameters()
             }
             // Initialize orbit + zoom gestures
             setupTouchControls()
+
 
             // New: Button to add impact dots
             binding.btnAddImpactDots.setOnClickListener {
@@ -163,60 +182,14 @@
 
             // New: Button to toggle pitch region
             binding.btnTogglePitchRegion.setOnClickListener {
+                sceneView.clearChildNodes()
             }
 
             // Add this to your onCreate method after other buttons
-            binding.btnDebugPitch.setOnClickListener {
-//                drawSimpleRectangle()
+            binding.btnMultipleTrack.setOnClickListener {
+                drawMultipleBallTracks()
             }
         }
-
-
-        // Pitch Data
-        /*val pitchLengthMarkers = arrayOf(
-            PitchLengthMarker(
-                text = "STUMPS",
-                position = Float3(1.855f, 0f, -10.06f + 1.5f / 2),
-                deliveryLengthRegion = DeliveryLengthRegion(
-                    height = 1.5f,
-                    color = mColor.parseColor("#B0AB60"),
-                    name = "Yorker"
-                )
-            ),
-            PitchLengthMarker(text = "2M", position = Float3(1.855f, 0f, -8.06f)),
-            PitchLengthMarker(
-                text = "",
-                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f / 2),
-                deliveryLengthRegion = DeliveryLengthRegion(
-                    height = 3.0f,
-                    color = mColor.parseColor("#9DB978"),
-                    name = "Full"
-                )
-            ),
-            PitchLengthMarker(text = "4M", position = Float3(1.855f, 0f, -6.06f)),
-            PitchLengthMarker(
-                text = "",
-                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f + 3.0f / 2),
-                deliveryLengthRegion = DeliveryLengthRegion(
-                    height = 3.0f,
-                    color = mColor.parseColor("#D99A96"),
-                    name = "Good"
-                )
-            ),
-            PitchLengthMarker(text = "6M", position = Float3(1.855f, 0f, -4.06f)),
-            PitchLengthMarker(text = "8M", position = Float3(1.855f, 0f, -2.06f)),
-            PitchLengthMarker(
-                text = "",
-                position = Float3(1.855f, 0f, -10.06f + 1.5f + 3.0f + 3.0f + 12.06f / 2),
-                deliveryLengthRegion = DeliveryLengthRegion(
-                    height = 12.06f,
-                    color = mColor.parseColor("#9BC4E2"), // pick your short color
-                    name = "Short"
-                )
-            ),
-            PitchLengthMarker(text = "HALFWAY", position = Float3(1.855f, 0f, 0f))
-        )*/
-
 
         fun generateSpacedPositions(): List<Float3> {
             val random = Random(System.currentTimeMillis())
@@ -542,9 +515,94 @@
 
         }
 
-        private fun clearOldPaths() {
-            modelNode?.childNodes?.toList()?.forEach {
-                if (it !is ModelNode) modelNode?.removeChildNode(it)
+        private fun drawBallTrack(
+            parameterX: FloatArray,
+            parameterY: FloatArray,
+            parameterZ: FloatArray,
+            color: Color,
+        ) {
+            val engine = sceneView.engine
+            val material = sceneView.materialLoader.createColorInstance(color)
+
+            val minFrameIdx = 0.0f
+            val maxFrameIdx = 300.0f
+            val step = 1.0f
+            val yGroundWorld = STADIUM_OFFSET.y + 0.5f
+
+            fun worldYAt(tVal: Float): Float {
+                val rawY = parameterY[0] * tVal * tVal + parameterY[1] * tVal + parameterY[2]
+                return rawY * SCALE + HEIGHT_BOOST + STADIUM_OFFSET.y
+            }
+
+            // find bounce frame
+            var bounceFrame: Float? = null
+            var t = minFrameIdx
+            var prevWorldY = worldYAt(t)
+            while (t <= maxFrameIdx) {
+                val worldY = worldYAt(t)
+                if (prevWorldY > yGroundWorld && worldY <= yGroundWorld) {
+                    bounceFrame = t
+                    break
+                }
+                prevWorldY = worldY
+                t += step
+            }
+
+            if (bounceFrame == null) return
+
+            val preBouncePath = buildBallPath(parameterX, parameterY, parameterZ, minFrameIdx, bounceFrame, step, false)
+            val postBouncePath = buildBallPath(parameterX, parameterY, parameterZ, bounceFrame, maxFrameIdx, step, true)
+
+            if (preBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, preBouncePath)
+            if (postBouncePath.isNotEmpty()) drawTube(sceneView, engine, material, postBouncePath)
+
+            val combinedPath = mutableListOf<Float3>().apply {
+                addAll(preBouncePath)
+                addAll(postBouncePath)
+            }
+
+            animateBallAlongPath(combinedPath)
+        }
+
+        private fun drawMultipleBallTracks() {
+            val baseX = floatArrayOf(0.00003f, 0.00003f, -0.95f)
+            val baseY = floatArrayOf(-0.0014491995f, 0.14178087f, -0.964562f)
+            val baseZ = floatArrayOf(2.5E-4f, -0.54509115f, 37.990707f)
+
+            val colors = listOf(
+                Color(1f, 0f, 0f, 1f),
+                Color(1f, 0f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 1f, 1f, 1f),
+                Color(0f, 0f, 0f, 1f),
+                Color(0f, 0f, 1f, 1f),
+                Color(0f, 1f, 0f, 1f),
+                Color(0f, 1f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 1f, 0f, 1f),
+                Color(1f, 0f, 0f, 1f),
+                Color(0f, 1f, 0f, 1f),
+                Color(1f, 0f, 0f, 1f),
+                Color(0f, 1f, 1f, 1f),
+                Color(1f, 1f, 0f, 1f)
+            )
+
+            repeat(15) { i ->
+                val variation = (i - 2) * 2f  // spread tracks horizontally
+
+                val parameterX = baseX.clone().apply {
+                    this[2] += variation   // shift starting X
+                }
+
+                val parameterY = baseY.clone().apply {
+                    this[1] += (Math.random().toFloat() - 0.5f) * 0.02f  // vary height slightly
+                }
+
+                val parameterZ = baseZ.clone().apply {
+                    this[2] += (Math.random().toFloat() - 0.5f) * 0.3f   // vary depth slightly
+                }
+
+                drawBallTrack(parameterX, parameterY, parameterZ, colors[i])
             }
         }
 
@@ -618,6 +676,58 @@
             return path
         }
 
+
+        private fun drawPitchLabels() {
+            // First, log modelNode info
+            modelNode?.let {
+                Log.d("ModelNode", "Position: ${it.position}")
+                Log.d("ModelNode", "Rotation: ${it.rotation}")
+                Log.d("ModelNode", "Scale: ${it.scale}")
+            }
+
+            val labels = listOf(
+                "STUMPS" to Float3(0f, 0.05f, -3f)
+            )
+
+            labels.forEach { (labelText, pos) ->
+                val tv = TextView(this).apply {
+                    text = labelText
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 320f)
+                    setTextColor(mColor.WHITE)
+                    setTypeface(Typeface.SANS_SERIF, Typeface.BOLD)
+                    gravity = Gravity.CENTER
+                    setBackgroundColor(mColor.RED)
+                    setPadding(60, 30, 60, 30)
+
+                    measure(
+                        mView.MeasureSpec.makeMeasureSpec(0, mView.MeasureSpec.UNSPECIFIED),
+                        mView.MeasureSpec.makeMeasureSpec(0, mView.MeasureSpec.UNSPECIFIED)
+                    )
+                    layout(0, 0, measuredWidth, measuredHeight)
+
+                    Log.d("PitchLabel", "TextView size: ${measuredWidth}x${measuredHeight}")
+                }
+
+                val node = ViewNode2(
+                    engine = sceneView.engine,
+                    windowManager = ViewNode2.WindowManager(this),
+                    materialLoader = sceneView.materialLoader,
+                    view = tv,
+                    unlit = true
+                ).apply {
+                    position = pos
+                    scale = Float3(1f, 0.5f, 1f)
+                }
+
+                // ADD DIRECTLY TO SCENEVIEW (not modelNode)
+                sceneView.addChildNode(node)
+
+                Log.d("PitchLabel", "Node added directly to sceneView")
+                Log.d("PitchLabel", "SceneView children count: ${sceneView.childNodes.size}")
+            }
+        }
+
+
         // ---------------------------------------------------------------------------------------------
         // 3. BALL ANIMATION
         // ---------------------------------------------------------------------------------------------
@@ -625,7 +735,7 @@
         /**
          * Moves a small white sphere along the given trajectory path.
          */
-        private fun animateBallAlongPath(path: List<Float3>) {
+        private fun animateBallAlongPaths(path: List<Float3>) {
             if (path.isEmpty()) return
             val engine = sceneView.engine
 
@@ -648,6 +758,48 @@
                     delay(frameDelay)
                 }
             }
+        }
+
+        private fun animateBallAlongPath(path: List<Float3>, color: Color = Color(1f, 1f, 1f, 1f)) {
+            if (path.size < 2) return
+            val engine = sceneView.engine
+
+            // create a new ball per path (if animating multiple balls)
+            val ballMaterial = sceneView.materialLoader.createColorInstance(color)
+            val ballNode = SphereNode(engine, radius = 0.1f, materialInstance = ballMaterial)
+            ballNode.position = path.first()
+            modelNode?.addChildNode(ballNode)
+
+            lifecycleScope.launch {
+                val totalDurationMs = 2000L
+                val frameRate = 60
+                val frameDelay = 1000L / frameRate
+                val totalFrames = (totalDurationMs / frameDelay).toInt()
+
+                for (frame in 0 until totalFrames) {
+                    val progress = frame.toFloat() / (totalFrames - 1)
+                    val scaledT = progress * (path.size - 1)
+
+                    val idx = scaledT.toInt().coerceIn(0, path.size - 2)
+                    val t = scaledT - idx
+
+                    val pos = lerpFloat3(path[idx], path[idx + 1], t)
+                    ballNode.position = pos
+
+                    delay(frameDelay)
+                }
+
+                // Optionally keep the ball at last position
+                ballNode.position = path.last()
+            }
+        }
+
+        private fun lerpFloat3(start: Float3, end: Float3, t: Float): Float3 {
+            return Float3(
+                start.x + (end.x - start.x) * t,
+                start.y + (end.y - start.y) * t,
+                start.z + (end.z - start.z) * t
+            )
         }
 
 
@@ -818,74 +970,50 @@
             modelNode?.addChildNode(cyl) ?: sceneView.addChildNode(cyl)
         }
 
-
         // ---------------------------------------------------------------------------------------------
-        // 5. TOUCH CONTROLS (Orbit + Zoom + Reset)
-        // ---------------------------------------------------------------------------------------------
+// 5. TOUCH CONTROLS (Simple Y-axis rotation)
+// ---------------------------------------------------------------------------------------------
 
         /**
-         * Configures touch listeners for single-finger rotate and two-finger pinch zoom.
+         * Configures touch listeners for simple horizontal rotation
          */
         private fun setupTouchControls() {
             sceneView.setOnTouchListener { v, event ->
                 gestureDetector.onTouchEvent(event)
-                when (event.pointerCount) {
-                    1 -> handleRotate(event)
-                    2 -> handlePinchZoom(event)
-                }
-                if (event.action == MotionEvent.ACTION_UP) {
-                    v.performClick()
-                    lastDistance = 0f
+
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        lastTouchX = event.x
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (event.pointerCount == 1) {
+                            handleRotate(event)
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        v.performClick()
+                    }
                 }
                 true
             }
         }
 
         /**
-         * Handles single-finger rotation around Y-axis.
+         * Simple horizontal rotation
          */
         private fun handleRotate(event: MotionEvent) {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastTouchX = event.x
-                }
+            val dx = event.x - lastTouchX
+            lastTouchX = event.x
 
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - lastTouchX
-                    lastTouchX = event.x
-                    rotationY += dx * 0.5f
+            // Rotate around Y-axis only - this is the key!
+            rotationY += dx * 0.5f
 
-                    // Preserve original X and Z rotation, only update Y (yaw)
-                    val baseRotation = initialModelRotation ?: Rotation(3.5f, 0f, 0f)
-                    modelNode?.rotation = Rotation(baseRotation.x, y = rotationY, baseRotation.z)
-                }
-            }
+            // Apply ONLY Y rotation to the model node directly
+            modelNode?.rotation = Rotation(0f, rotationY, 0f)
         }
 
         /**
-         * Handles two-finger pinch zoom on the model.
-         */
-        private fun handlePinchZoom(event: MotionEvent) {
-            if (event.pointerCount < 2) return
-            val dx = event.getX(0) - event.getX(1)
-            val dy = event.getY(0) - event.getY(1)
-            val distance = sqrt(dx * dx + dy * dy)
-            if (lastDistance != 0f) {
-                val scaleChange = distance / lastDistance
-                scaleFactor = (scaleFactor * scaleChange).coerceIn(0.25f, 2.5f)
-
-                // Multiply original (non-uniform) scale by scalar factor
-                val baseScale = initialModelScale ?: Float3(0.45f, 0.45f, 0.35f)
-                modelNode?.scale = Float3(
-                    baseScale.x * scaleFactor,
-                    baseScale.y * scaleFactor,
-                    baseScale.z * scaleFactor
-                )
-            }
-        }
-
-        /**
-         * Resets rotation and zoom on double-tap gesture.
+         * Resets to default view on double-tap
          */
         private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -895,22 +1023,12 @@
         }
 
         /**
-         * Restores default camera angle and stadium scale.
+         * Reset to default view
          */
         private fun resetView() {
             rotationY = 0f
-            scaleFactor = 1.0f
-
-            initialModelPosition?.let { modelNode?.position = it }
-            initialModelScale?.let { modelNode?.scale = it }
-            initialModelRotation?.let { modelNode?.rotation = it }
-
-            // clear any gesture state
-            lastDistance = 0f
-            lastTouchX = 0f
+            modelNode?.rotation = Rotation(0f, 0f, 0f)
         }
-
-
         // ---------- lifecycle ----------
         override fun onResume() {
             super.onResume()
